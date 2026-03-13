@@ -13,3 +13,4 @@ env/
 serviceAccount*.json
 *firebase*.json
 *firebase-adminsdk*.json
+tiingo_api_token_*.txt

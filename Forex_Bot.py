@@ -402,21 +402,22 @@ class ForexTradingBotTiingo:
         base_token = self.config['tiingo_api_token']
         uri = f"{self.config['tiingo_websocket_url']}?token={base_token}"
 
-        try:
-            async with websockets.connect(uri) as websocket:
-                self.websocket = websocket
-                print("Successfully connected to Tiingo WebSocket.")
-                print("Starting FOREX ticker watch loop...")
-                print("Starting FOREX signal generation loop...")
-
-                await self._subscribe_to_pairs()
-                await self._handle_websocket_messages()
-
-        except Exception as e:
-            print(f"{Fore.RED}WebSocket connection failed: {e}")
-            print(f"{Fore.YELLOW}Reconnecting in 5 seconds...")
-            await asyncio.sleep(5)
-            await self._connect_and_subscribe()
+        backoff = 5
+        while True:
+            try:
+                async with websockets.connect(uri) as websocket:
+                    self.websocket = websocket
+                    print("Successfully connected to Tiingo WebSocket.")
+                    print("Starting FOREX ticker watch loop...")
+                    print("Starting FOREX signal generation loop...")
+                    await self._subscribe_to_pairs()
+                    await self._handle_websocket_messages()
+                    backoff = 5
+            except Exception as e:
+                print(f"{Fore.RED}WebSocket connection failed: {e}")
+                print(f"{Fore.YELLOW}Reconnecting in {backoff} seconds...")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
 
     async def _subscribe_to_pairs(self):
         """
@@ -674,7 +675,7 @@ class ForexTradingBotTiingo:
             )
             print(f"{Fore.YELLOW}Attempting to reconnect in 5 seconds...")
             await asyncio.sleep(5)
-            await self._connect_and_subscribe()
+            return
         except Exception as e:
             print(f"{Fore.RED}[ERROR] A critical error occurred in message handler: {e}")
             import traceback
