@@ -259,44 +259,43 @@ class ForexTradingBotTiingo:
     def _initialize_firebase(self):
         """
         Firebase Realtime Database se connection banata hai.
-        Pehle Env Var (FIREBASE_CREDENTIALS_JSON) check karta hai, phir local file.
+        Pehle Railway environment variable (FIREBASE_CREDENTIALS_JSON) check karta hai.
         """
         try:
             if not firebase_admin._apps:
-                # 1. Try Environment Variable (Railway/Render)
-                cred_json = self.config.get('firebase_credentials_json')
+                # 1. Railway Environment Variable Check
+                cred_json = os.environ.get("FIREBASE_CREDENTIALS_JSON")
+                db_url = self.config.get('firebase_db_url')
+
                 if cred_json:
                     try:
-                        print(f"{Fore.CYAN}Using Firebase credentials from environment variable...")
-                        if isinstance(cred_json, str):
-                            cred_info = json.loads(cred_json)
-                        else:
-                            cred_info = cred_json
+                        print(f"{Fore.CYAN}Initializing Firebase from environment variable (FIREBASE_CREDENTIALS_JSON)...")
+                        # JSON string ko dict me convert karo agar string hai
+                        cred_info = json.loads(cred_json) if isinstance(cred_json, str) else cred_json
                         cred = credentials.Certificate(cred_info)
-                        firebase_admin.initialize_app(cred, {'databaseURL': self.config['firebase_db_url']})
+                        
+                        firebase_admin.initialize_app(cred, {'databaseURL': db_url})
                         print(f"{Fore.GREEN}Successfully connected to Firebase Realtime Database (via Env Var).")
                         return db.reference('/')
                     except Exception as env_e:
-                        print(f"{Fore.YELLOW}Failed to load credentials from Env Var: {env_e}. Falling back to file...")
+                        print(f"{Fore.RED}Error initializing from FIREBASE_CREDENTIALS_JSON: {env_e}")
 
-                # 2. Try Local File Path
-                cred_path = self.config['firebase_credentials_path']
-                if os.path.exists(cred_path):
+                # 2. Local File Path Fallback
+                cred_path = self.config.get('firebase_credentials_path')
+                if cred_path and os.path.exists(cred_path):
+                    print(f"{Fore.CYAN}Initializing Firebase from local file: {cred_path}")
                     cred = credentials.Certificate(cred_path)
-                    firebase_admin.initialize_app(
-                        cred,
-                        {'databaseURL': self.config['firebase_db_url']},
-                    )
+                    firebase_admin.initialize_app(cred, {'databaseURL': db_url})
                     print(f"{Fore.GREEN}Successfully connected to Firebase Realtime Database (via File).")
                     return db.reference('/')
                 else:
-                    print(f"{Fore.RED}Firebase credentials not found in environment variable OR file at: {cred_path}")
+                    print(f"{Fore.RED}Firebase initialization failed: No valid credentials found (Env Var or File).")
                     return None
 
             return db.reference('/')
 
         except Exception as e:
-            print(f"{Fore.RED}Failed to initialize Firebase: {e}")
+            print(f"{Fore.RED}Critical error in Firebase initialization: {e}")
             return None
 
     def _send_top_pairs_to_firebase(self, pairs_list):
@@ -447,7 +446,7 @@ class ForexTradingBotTiingo:
         """
         Tiingo ko subscription message bhejta hai.
         """
-        if not self.websocket or not self.websocket.open:
+        if not self.websocket:
             return
 
         print(f"{Fore.CYAN}Subscribing to FOREX pairs: {', '.join(self.top_pairs)}")
