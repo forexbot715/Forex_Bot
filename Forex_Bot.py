@@ -23,7 +23,7 @@ CONFIG = {
     # --- Tiingo API Settings ---
     # NOTE: Yahan apna real Tiingo FX API token dalna hai
     # Behtar yeh hai ke aap env var use karein (security ke liye)
-    "tiingo_api_token": os.getenv("TIINGO_FX_API_TOKEN"),
+    "TIINGO_API_KEY": os.getenv("TIINGO_API_KEY"),
     "tiingo_websocket_url": "wss://api.tiingo.com/fx",
 
     # --- Strategy Timeframes ---
@@ -397,7 +397,8 @@ class ForexTradingBotTiingo:
         Tiingo WebSocket se connect hota hai aur forex pairs subscribe karta hai.
         Heartbeat (ping/pong) aur exponential backoff ke saath stable reconnection handle karta hai.
         """
-        base_token = self.config['tiingo_api_token']
+        base_token = self.config['TIINGO_API_KEY']
+
         uri = f"{self.config['tiingo_websocket_url']}?token={base_token}"
 
         backoff = 5
@@ -452,7 +453,8 @@ class ForexTradingBotTiingo:
         print(f"{Fore.CYAN}Subscribing to FOREX pairs: {', '.join(self.top_pairs)}")
         subscription_message = {
             "eventName": "subscribe",
-            "authorization": self.config['tiingo_api_token'],
+            "authorization": self.config['TIINGO_API_KEY'],
+
             "eventData": {
                 "tickers": self.top_pairs,
             },
