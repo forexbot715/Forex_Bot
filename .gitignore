@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+.env
+.venv
+venv/
+env/
+.pytest_cache/
+.vscode/
+.idea/
+*.log
+serviceAccount*.json
+*firebase*.json
+*firebase-adminsdk*.json

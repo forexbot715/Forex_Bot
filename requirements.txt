@@ -1,0 +1,9 @@
+ccxt
+pandas
+pyarrow
+ta
+colorama
+firebase-admin
+numpy
+websockets
+aiohttp

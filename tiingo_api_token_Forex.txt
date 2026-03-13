@@ -1,0 +1,2 @@
+    "tiingo_api_token": "c4dae35637b0b342938fd92a037d73d35d5874ca",
+Forex
