@@ -396,33 +396,61 @@ class ForexTradingBotTiingo:
     async def _connect_and_subscribe(self):
         """
         Tiingo WebSocket se connect hota hai aur forex pairs subscribe karta hai.
-        Agar connection toot jaye to auto-reconnect try karega.
+        Heartbeat (ping/pong) aur exponential backoff ke saath stable reconnection handle karta hai.
         """
-        # Yahan runtime me actual token use hoga (CONFIG se)
         base_token = self.config['tiingo_api_token']
         uri = f"{self.config['tiingo_websocket_url']}?token={base_token}"
 
         backoff = 5
+        max_backoff = 40  # As requested: 5s -> 10s -> 20s -> 40s
+        
         while True:
             try:
-                async with websockets.connect(uri) as websocket:
+                # ping_interval aur ping_timeout add kiya heartbeat ke liye (stable connection)
+                async with websockets.connect(
+                    uri, 
+                    ping_interval=20, 
+                    ping_timeout=20,
+                    close_timeout=10
+                ) as websocket:
                     self.websocket = websocket
-                    print("Successfully connected to Tiingo WebSocket.")
-                    print("Starting FOREX ticker watch loop...")
-                    print("Starting FOREX signal generation loop...")
-                    await self._subscribe_to_pairs()
-                    await self._handle_websocket_messages()
+                    print(f"{Fore.GREEN}Successfully connected to Tiingo WebSocket.")
+                    
+                    # Reset backoff on successful connection
                     backoff = 5
-            except Exception as e:
-                print(f"{Fore.RED}WebSocket connection failed: {e}")
-                print(f"{Fore.YELLOW}Reconnecting in {backoff} seconds...")
+                    
+                    # Sirf ek baar subscription bhejni hai har naye connection par
+                    await self._subscribe_to_pairs()
+                    
+                    # Main message loop (awaits until connection drops)
+                    await self._handle_websocket_messages()
+
+            except (websockets.exceptions.ConnectionClosed, ConnectionError) as e:
+                # Disconnect source detect karna (Client vs Server)
+                source = "Server" if hasattr(e, 'rcvd') and e.rcvd else "Client"
+                code = getattr(e, 'code', 'Unknown')
+                reason = getattr(e, 'reason', 'No reason provided')
+                
+                print(f"{Fore.RED}[DISCONNECT] {source} closed the connection. Code: {code}, Reason: {reason}")
+                print(f"{Fore.YELLOW}Reconnecting in {backoff} seconds (Exponential Backoff)...")
+                
                 await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60)
+                backoff = min(backoff * 2, max_backoff)
+
+            except Exception as e:
+                print(f"{Fore.RED}[CRITICAL ERROR] WebSocket connection failed: {e}")
+                print(f"{Fore.YELLOW}Attempting recovery in {backoff} seconds...")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
 
     async def _subscribe_to_pairs(self):
         """
-        Tiingo ko subscription message bhejta hai, takay hum live ticks receive kar saken.
+        Tiingo ko subscription message bhejta hai.
         """
+        if not self.websocket or not self.websocket.open:
+            return
+
+        print(f"{Fore.CYAN}Subscribing to FOREX pairs: {', '.join(self.top_pairs)}")
         subscription_message = {
             "eventName": "subscribe",
             "authorization": self.config['tiingo_api_token'],
@@ -431,7 +459,6 @@ class ForexTradingBotTiingo:
             },
         }
         await self.websocket.send(json.dumps(subscription_message))
-        # Agar yahan error nahi aaya to subscription ok hai
 
     # ------------------ Candle Building (1-min -> 15m/1h/4h) ------------------
 
@@ -625,8 +652,8 @@ class ForexTradingBotTiingo:
 
     async def _handle_websocket_messages(self):
         """
-        WebSocket se har tick message read karta hai, JSON parse karta hai,
-        price update karta hai, candles build karta hai, aur TP/SL check karta hai.
+        WebSocket se har tick message read karta hai aur indicators aggregate karta hai.
+        Disconnect hone par gracefully return karta hai taake outer loop reconnect kar sake.
         """
         try:
             async for message in self.websocket:
@@ -651,35 +678,26 @@ class ForexTradingBotTiingo:
                                 {'price': price, 'timestamp': datetime.now(timezone.utc)},
                             )
 
-                            # Agar signal active hai to TP/SL check + signal price update
+                            # Signal check aur Firebase sync
                             if symbol in self.active_signals:
                                 await self._check_tp_sl(symbol, price)
                                 self._update_signal_price_in_firebase(symbol, price)
                             else:
-                                # Agar koi active signal nahi hai to sirf live price Firebase me bhejo
                                 self._update_live_price_in_firebase(symbol, price)
 
                             await self._build_higher_timeframe_candles(symbol)
 
                 except json.JSONDecodeError:
-                    print(f"{Fore.RED}[ERROR] Failed to decode JSON from message: {message}")
+                    print(f"{Fore.RED}[ERROR] JSON Decode Error: {message[:100]}...")
                 except Exception as e:
-                    print(f"{Fore.RED}[ERROR] Error processing message: {e}")
-                    import traceback
-                    print(traceback.format_exc())
+                    print(f"{Fore.RED}[ERROR] Processing Error: {e}")
 
-        except websockets.exceptions.ConnectionClosed as e:
-            print(
-                f"{Fore.RED}[ERROR] WebSocket connection closed unexpectedly. "
-                f"Code: {e.code}, Reason: {e.reason}"
-            )
-            print(f"{Fore.YELLOW}Attempting to reconnect in 5 seconds...")
-            await asyncio.sleep(5)
-            return
+        except websockets.exceptions.ConnectionClosed:
+            # Outer loop will handle this
+            raise
         except Exception as e:
-            print(f"{Fore.RED}[ERROR] A critical error occurred in message handler: {e}")
-            import traceback
-            print(traceback.format_exc())
+            print(f"{Fore.RED}[CRITICAL] Error in message handler: {e}")
+            raise
 
     # ------------------ Firebase Helpers (live price + signals + history) ------------------
 
